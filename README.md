@@ -131,7 +131,10 @@ A lightweight RandomForest model is trained on internally split data. Features w
 
 ### Temporal Leakage Detection
 
-Identifies potential datetime columns and checks if the dataset is sorted by time. A sorted dataset poses a risk for random train-test splits, which could cause the model to train on future data to predict the past.
+
+### Temporal Leakage Detection
+
+Identifies potential datetime columns and checks for high target autocorrelation when the data is sorted by time. High autocorrelation indicates time-dependence, meaning random splits could leak future information into the training set.
 
 ---
 
@@ -155,7 +158,7 @@ High Importance:
 ['final_status']
 
 Temporal Leakage Risks:
-- Dataset is sorted by 'transaction_date' (Ascending) - Random splits may leak future info
+- High Target Autocorrelation (0.85) when sorted by 'transaction_date'. Data is time-dependent; use TimeSeriesSplit instead of random split.
 ```
 
 ---
@@ -178,18 +181,6 @@ run_leakguard("dataset.csv", target="TargetColumn")
 
 Or run directly from notebook using the provided functions.
 
----
-
-## Design Principles
-
-* Minimalistic scope
-* Modular functions
-* Dataset-agnostic logic
-* Inspection over transformation
-* Human-in-the-loop decision making
-* Avoid overengineering
-
----
 
 ## Future Work
 

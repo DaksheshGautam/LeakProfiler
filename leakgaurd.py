@@ -23,7 +23,7 @@ def run_leakguard(file_path, target_column):
     report['duplicates'] = detect_duplicates(df)
     report['high_correlation'] = detect_high_correlation(X, y)
     report['high_importance'] = detect_feature_importance_leakage(X, y)
-    report['temporal_leakage'] = detect_temporal_leakage(df)
+    report['temporal_leakage'] = detect_temporal_leakage(df, target_column)
     
     # 4. Generate Report
     print_report(report)
@@ -112,10 +112,10 @@ def detect_feature_importance_leakage(X, y, threshold=0.30):
     
     return high_importance_features
 
-def detect_temporal_leakage(df):
+def detect_temporal_leakage(df, target_col):
     """
-    Detects potential temporal leakage risks by checking if the data 
-    is sorted by any datetime columns.
+    Detects potential temporal leakage risks by checking target autocorrelation
+    when sorted by date columns.
     """
     temporal_warnings = []
     
@@ -137,16 +137,31 @@ def detect_temporal_leakage(df):
         except:
             pass
             
-    # Check monotonicity
+    # Check Autocorrelation
     for col in set(date_cols):
         try:
-            series = pd.to_datetime(df[col], errors='coerce').dropna()
-            if len(series) < 2:
+            # Create a temporary dataframe to sort without affecting original
+            temp_df = df[[col, target_col]].copy()
+            
+            # Ensure target is numeric for correlation
+            if temp_df[target_col].dtype == 'object':
+                temp_df[target_col] = LabelEncoder().fit_transform(temp_df[target_col])
+            
+            # Sort by date
+            temp_df[col] = pd.to_datetime(temp_df[col], errors='coerce')
+            temp_df = temp_df.dropna().sort_values(by=col)
+            
+            if len(temp_df) < 10: 
                 continue
-            if series.is_monotonic_increasing:
-                temporal_warnings.append(f"Dataset is sorted by '{col}' (Ascending) - Random splits may leak future info")
-            elif series.is_monotonic_decreasing:
-                temporal_warnings.append(f"Dataset is sorted by '{col}' (Descending) - Random splits may leak future info")
+
+            # Calculate Autocorrelation (Lag 1)
+            autocorr = temp_df[target_col].autocorr(lag=1)
+            
+            if abs(autocorr) > 0.5:
+                temporal_warnings.append(
+                    f"High Target Autocorrelation ({autocorr:.2f}) when sorted by '{col}'. "
+                    "Data is time-dependent; use TimeSeriesSplit instead of random split."
+                )
         except:
             continue
             
