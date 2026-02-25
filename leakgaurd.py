@@ -1,13 +1,13 @@
+__version__ = "0.2"
+
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
 
-def run_leakguard(file_path, target_column):
-    """
-    Main function to run the LeakGuard tool.
-    """
+def run_leakguard(file_path, target_column):        #Main function to run the LeakGuard tool.
+    
     report = {}
     
     # 1. Load Data
@@ -28,36 +28,28 @@ def run_leakguard(file_path, target_column):
     # 4. Generate Report
     print_report(report)
 
-def detect_identifiers(df, threshold=0.95):
-    """
-    Detects columns that are likely identifiers based on uniqueness.
-    """
+def detect_identifiers(df, threshold=0.95):         #Detects columns that are likely identifiers based on uniqueness.
+    
     identifier_cols = []
     for col in df.columns:
         if df[col].nunique() / len(df) > threshold:
             identifier_cols.append(col)
     return identifier_cols
 
-def detect_duplicates(df):
-    """
-    Detects duplicate rows in the dataframe.
-    """
+def detect_duplicates(df):                  #Detects duplicate rows in the dataframe.
     return df.duplicated().sum()
 
-def detect_high_correlation(X, y, threshold=0.8):
-    """
-    Detects features with high correlation to the target.
-    """
-    # Ensure y is numeric for correlation calculation
-    y_numeric = y
+def detect_high_correlation(X, y, threshold=0.8):           #Detects features with high correlation to the target.
+
+    y_numeric = y                               # Ensure y is numeric for correlation calculation
     if y.dtype == 'object':
         le = LabelEncoder()
         y_numeric = le.fit_transform(y)
 
-    # Combine features and target for correlation matrix
-    df_corr = X.copy()
-    # Preprocess data: handle categorical features and NaNs
-    for col in df_corr.columns:
+    
+    df_corr = X.copy()                          # Combine features and target for correlation matrix  
+    
+    for col in df_corr.columns:                 # Preprocess data: handle categorical features and NaNs
         if df_corr[col].dtype == 'object':
             df_corr[col] = df_corr[col].astype('category').cat.codes
         if df_corr[col].isnull().any():
@@ -65,36 +57,35 @@ def detect_high_correlation(X, y, threshold=0.8):
 
     df_corr['target'] = y_numeric
 
-    # Select only numeric columns for correlation calculation
-    numeric_df_corr = df_corr.select_dtypes(include=np.number)
+    
+    numeric_df_corr = df_corr.select_dtypes(include=np.number)          # Select only numeric columns for correlation calculation
 
-    # Calculate correlations
-    correlations = numeric_df_corr.corr()['target'].abs().sort_values(ascending=False)
+    
+    correlations = numeric_df_corr.corr()['target'].abs().sort_values(ascending=False)      # Calculate correlations
 
-    # Filter high correlations (excluding target itself)
-    high_corr_features = correlations[correlations > threshold]
+
+    
+    high_corr_features = correlations[correlations > threshold]          # Filter high correlations (excluding target itself)
     high_corr_features = high_corr_features.drop('target', errors='ignore')
 
     return high_corr_features.index.tolist()
 
 
-def detect_feature_importance_leakage(X, y, threshold=0.30):
-    """
-    Detects leakage using feature importance from a RandomForest model.
-    """
-    # Preprocess data: handle categorical features
-    X_processed = X.copy()
+def detect_feature_importance_leakage(X, y, threshold=0.30):            #Detects leakage using feature importance from a RandomForest model.
+    
+    
+    X_processed = X.copy()                      # Preprocess data: handle categorical features and NaNs
     for col in X_processed.columns:
         if X_processed[col].dtype == 'object':
             X_processed[col] = X_processed[col].astype('category').cat.codes
-        # Fill NaNs for model training
-        if X_processed[col].isnull().any():
+        
+        if X_processed[col].isnull().any():                 # Handle missing values
             X_processed[col] = X_processed[col].fillna(X_processed[col].median())
 
-    # Handle categorical target
-    y_processed = y
+    
+    y_processed = y                             
     if y_processed.dtype == 'object':
-        le = LabelEncoder()
+        le = LabelEncoder()                             # Handle categorical target
         y_processed = le.fit_transform(y_processed)
             
     # Train a lightweight RandomForest model
@@ -104,19 +95,20 @@ def detect_feature_importance_leakage(X, y, threshold=0.30):
     model = RandomForestClassifier(n_estimators=20, random_state=42, n_jobs=-1)
     model.fit(X_train, y_train)
     
-    # Get feature importances
-    importances = pd.Series(model.feature_importances_, index=X_processed.columns)
     
-    # Flag features with unusually high importance
-    high_importance_features = importances[importances > threshold].index.tolist()
+    importances = pd.Series(model.feature_importances_, index=X_processed.columns)          # Get feature importances
+    
+    high_importance_features = importances[importances > threshold].index.tolist()          # Filter high importance features
     
     return high_importance_features
 
-def detect_temporal_leakage(df, target_col):
-    """
-    Detects potential temporal leakage risks by checking target autocorrelation
-    when sorted by date columns.
-    """
+def detect_temporal_leakage(df, target_col, threshold=0.4):
+    
+    #Detects potential temporal leakage risks by checking multiple signals:
+    #1. Target Autocorrelation (when sorted by date)
+    #2. Regular Time Spacing (e.g., hourly, daily)
+    #3. Timestamp Uniqueness
+
     temporal_warnings = []
     
     # Identify potential datetime columns
@@ -130,48 +122,91 @@ def detect_temporal_leakage(df, target_col):
     for col in candidate_cols:
         try:
             # Check first few non-null values to see if they parse
-            sample = df[col].dropna().head(10)
+            sample = df[col].dropna().head(100)
             if len(sample) > 0:
-                pd.to_datetime(sample, errors='raise')
-                date_cols.append(col)
+                # Use coerce to handle potential mixed formats or noise
+                parsed = pd.to_datetime(sample, errors='coerce')
+                # If more than 50% parse successfully, treat as date
+                if parsed.notna().sum() > len(sample) * 0.5:
+                    date_cols.append(col)
         except:
             pass
             
     # Check Autocorrelation
     for col in set(date_cols):
-        try:
-            # Create a temporary dataframe to sort without affecting original
-            temp_df = df[[col, target_col]].copy()
-            
-            # Ensure target is numeric for correlation
-            if temp_df[target_col].dtype == 'object':
-                temp_df[target_col] = LabelEncoder().fit_transform(temp_df[target_col])
-            
-            # Sort by date
-            temp_df[col] = pd.to_datetime(temp_df[col], errors='coerce')
-            temp_df = temp_df.dropna().sort_values(by=col)
-            
-            if len(temp_df) < 10: 
-                continue
+        # Create a temporary dataframe to sort without affecting original
+        temp_df = df[[col, target_col]].copy()
+        
+        # Drop NaNs
+        temp_df = temp_df.dropna()
 
-            # Calculate Autocorrelation (Lag 1)
-            autocorr = temp_df[target_col].autocorr(lag=1)
-            
-            if abs(autocorr) > 0.5:
-                temporal_warnings.append(
-                    f"High Target Autocorrelation ({autocorr:.2f}) when sorted by '{col}'. "
-                    "Data is time-dependent; use TimeSeriesSplit instead of random split."
-                )
+        # Parse date column to ensure it's datetime
+        try:
+            temp_df[col] = pd.to_datetime(temp_df[col], errors='coerce')
+            temp_df = temp_df.dropna(subset=[col])
         except:
             continue
+
+        if len(temp_df) < 10: 
+            continue
+
+        # Ensure target is numeric for correlation
+        if temp_df[target_col].dtype == 'object':
+            try:
+                temp_df[target_col] = pd.to_numeric(temp_df[target_col])
+            except:
+                le = LabelEncoder()
+                temp_df[target_col] = le.fit_transform(temp_df[target_col].astype(str))
+        
+        # Sort by date
+        temp_df = temp_df.sort_values(by=col)
+        
+        # --- Signal 1: Autocorrelation ---
+        autocorr = temp_df[target_col].autocorr(lag=1)
+        if pd.isna(autocorr):
+            autocorr = 0.0
             
+        # --- Signal 2: Regular Spacing ---
+        is_regular = False
+        time_diffs = temp_df[col].diff().dropna()
+        if len(time_diffs) > 0:
+            # Check if the most frequent time delta constitutes > 80% of the data
+            mode_freq = time_diffs.value_counts(normalize=True).iloc[0]
+            if mode_freq > 0.8:
+                is_regular = True
+
+        # --- Signal 3: Uniqueness ---
+        n_unique = temp_df[col].nunique()
+        uniqueness_ratio = n_unique / len(temp_df)
+        is_unique = uniqueness_ratio > 0.95
+
+        # --- Decision Logic ---
+        detected_signals = []
+        
+        if abs(autocorr) > threshold:
+            detected_signals.append(f"High Target Autocorrelation ({autocorr:.2f})")
+        elif abs(autocorr) > 0.1:
+            detected_signals.append(f"Moderate Target Autocorrelation ({autocorr:.2f})")
+            
+        if is_regular:
+            detected_signals.append("Regular Time Spacing")
+            
+        if is_unique:
+            detected_signals.append("High Timestamp Uniqueness")
+            
+        # Flag if we have strong autocorrelation OR multiple temporal signals
+        if (abs(autocorr) > threshold) or (len(detected_signals) >= 2):
+            temporal_warnings.append(
+                f"Temporal Leakage Risk in '{col}': {', '.join(detected_signals)}. "
+                "Data appears to be a time-series; use TimeSeriesSplit."
+            )
+    print(col, autocorr, uniqueness_ratio, mode_freq)
     return temporal_warnings
 
-def print_report(report):
-    """
-    Prints the final LeakGuard report.
-    """
-    print("========== LeakGuard Report ==========")
+
+def print_report(report):               #Prints the final LeakGuard report.
+   
+    print("LeakGuard Report v{__version__}: ")
     print(f"Dataset shape: {report['dataset_shape']}")
     
     if report['identifier_risk']:
@@ -194,4 +229,4 @@ def print_report(report):
         for warning in report['temporal_leakage']:
             print(f"- {warning}")
         
-    print("========== End of Report ==========")
+    print("End of Report.")
