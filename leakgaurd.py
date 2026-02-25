@@ -1,32 +1,41 @@
-__version__ = "0.2"
+__version__ = "0.3"
 
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
+from dataclasses import dataclass
+from typing import List, Any, Optional
+
+@dataclass
+class Finding:
+    title: str
+    severity: str
+    description: str
+    evidence: Any
+    recommendation: List[str]
 
 def run_leakguard(file_path, target_column):        #Main function to run the LeakGuard tool.
     
-    report = {}
+    findings = []
     
     # 1. Load Data
     df = pd.read_csv(file_path)
-    report['dataset_shape'] = df.shape
     
     # 2. Separate Target
     X = df.drop(columns=[target_column])
     y = df[target_column]
     
     # 3. Run Detectors
-    report['identifier_risk'] = detect_identifiers(X)
-    report['duplicates'] = detect_duplicates(df)
-    report['high_correlation'] = detect_high_correlation(X, y)
-    report['high_importance'] = detect_feature_importance_leakage(X, y)
-    report['temporal_leakage'] = detect_temporal_leakage(df, target_column)
+    if f := detect_identifiers(X): findings.append(f)
+    if f := detect_duplicates(df): findings.append(f)
+    if f := detect_high_correlation(X, y): findings.append(f)
+    if f := detect_feature_importance_leakage(X, y): findings.append(f)
+    if f := detect_temporal_leakage(df, target_column): findings.append(f)
     
     # 4. Generate Report
-    print_report(report)
+    print_report(findings, df.shape)
 
 def detect_identifiers(df, threshold=0.95):         #Detects columns that are likely identifiers based on uniqueness.
     
@@ -34,10 +43,34 @@ def detect_identifiers(df, threshold=0.95):         #Detects columns that are li
     for col in df.columns:
         if df[col].nunique() / len(df) > threshold:
             identifier_cols.append(col)
-    return identifier_cols
+            
+    if identifier_cols:
+        return Finding(
+            title="Identifier columns detected",
+            severity="MEDIUM",
+            description="Columns with near-unique values allow row memorization.",
+            evidence=identifier_cols,
+            recommendation=[
+                "Drop identifier columns before training",
+                "Keep only if needed for joins"
+            ]
+        )
+    return None
 
 def detect_duplicates(df):                  #Detects duplicate rows in the dataframe.
-    return df.duplicated().sum()
+    count = df.duplicated().sum()
+    if count > 0:
+        return Finding(
+            title="Duplicate rows detected",
+            severity="LOW",
+            description="Duplicate rows can artificially inflate model performance if they appear in both train and test sets.",
+            evidence=f"{count} rows",
+            recommendation=[
+                "Remove duplicate rows",
+                "Check data collection pipeline"
+            ]
+        )
+    return None
 
 def detect_high_correlation(X, y, threshold=0.8):           #Detects features with high correlation to the target.
 
@@ -68,7 +101,18 @@ def detect_high_correlation(X, y, threshold=0.8):           #Detects features wi
     high_corr_features = correlations[correlations > threshold]          # Filter high correlations (excluding target itself)
     high_corr_features = high_corr_features.drop('target', errors='ignore')
 
-    return high_corr_features.index.tolist()
+    if not high_corr_features.empty:
+        return Finding(
+            title="High correlation with target",
+            severity="HIGH",
+            description="Features with extremely high correlation to the target may be proxies for the target itself (leakage).",
+            evidence=high_corr_features.index.tolist(),
+            recommendation=[
+                "Inspect these features manually",
+                "Remove if they are post-outcome variables"
+            ]
+        )
+    return None
 
 
 def detect_feature_importance_leakage(X, y, threshold=0.30):            #Detects leakage using feature importance from a RandomForest model.
@@ -100,7 +144,18 @@ def detect_feature_importance_leakage(X, y, threshold=0.30):            #Detects
     
     high_importance_features = importances[importances > threshold].index.tolist()          # Filter high importance features
     
-    return high_importance_features
+    if high_importance_features:
+        return Finding(
+            title="High feature importance detected",
+            severity="MEDIUM",
+            description="A simple model found these features to be overwhelmingly predictive, suggesting potential leakage.",
+            evidence=high_importance_features,
+            recommendation=[
+                "Verify if these features are available at prediction time",
+                "Check for target leakage"
+            ]
+        )
+    return None
 
 def detect_temporal_leakage(df, target_col, threshold=0.4):
     
@@ -200,33 +255,37 @@ def detect_temporal_leakage(df, target_col, threshold=0.4):
                 f"Temporal Leakage Risk in '{col}': {', '.join(detected_signals)}. "
                 "Data appears to be a time-series; use TimeSeriesSplit."
             )
-    print(col, autocorr, uniqueness_ratio, mode_freq)
-    return temporal_warnings
+            
+    if temporal_warnings:
+        return Finding(
+            title="Temporal leakage risk",
+            severity="HIGH",
+            description="Data exhibits strong time-dependence. Random splits will cause future-to-past leakage.",
+            evidence=temporal_warnings,
+            recommendation=[
+                "Use TimeSeriesSplit for validation",
+                "Do not use random K-Fold or train_test_split"
+            ]
+        )
+    return None
 
 
-def print_report(report):               #Prints the final LeakGuard report.
-   
-    print("LeakGuard Report v{__version__}: ")
-    print(f"Dataset shape: {report['dataset_shape']}")
+def print_report(findings, shape):               #Prints the final LeakGuard report.
+
+    print(f"========== LeakGuard Report v{__version__} ==========")
+    print(f"Dataset shape: {shape}\n")
     
-    if report['identifier_risk']:
-        print("Identifier Risk:")
-        print(report['identifier_risk'])
-        
-    if report['duplicates'] > 0:
-        print(f"Duplicates:{report['duplicates']}")
-        
-    if report['high_correlation']:
-        print("High Correlation with Target:")
-        print(report['high_correlation'])
-        
-    if report['high_importance']:
-        print("High Importance Features (Potential Leakage):")
-        print(report['high_importance'])
-        
-    if report.get('temporal_leakage'):
-        print("Temporal Leakage Risks:")
-        for warning in report['temporal_leakage']:
-            print(f"- {warning}")
-        
+    if not findings:
+        print("No leakage risks detected. Good job!")
+        return
+
+    for finding in findings:
+        print(f"[{finding.severity}] {finding.title}")
+        print(f"  Risk: {finding.description}")
+        print(f"  Evidence: {finding.evidence}")
+        print("  Recommendations:")
+        for rec in finding.recommendation:
+            print(f"   - {rec}")
+        print("-" * 50 + "\n")
+    
     print("End of Report.")
