@@ -3,7 +3,7 @@ __version__ = "0.3"
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.preprocessing import LabelEncoder
 from dataclasses import dataclass
 from typing import List, Any, Optional
@@ -30,6 +30,7 @@ def run_leakguard(file_path, target_column):        #Main function to run the Le
     # 3. Run Detectors
     if f := detect_identifiers(X): findings.append(f)
     if f := detect_duplicates(df): findings.append(f)
+    if f := detect_group_leakage(df, target_column): findings.append(f)
     if f := detect_high_correlation(X, y): findings.append(f)
     if f := detect_feature_importance_leakage(X, y): findings.append(f)
     if f := detect_temporal_leakage(df, target_column): findings.append(f)
@@ -39,6 +40,9 @@ def run_leakguard(file_path, target_column):        #Main function to run the Le
 
 def detect_identifiers(df, threshold=0.95):         #Detects columns that are likely identifiers based on uniqueness.
     
+    if len(df) == 0:
+        return None
+
     identifier_cols = []
     for col in df.columns:
         if df[col].nunique() / len(df) > threshold:
@@ -68,6 +72,102 @@ def detect_duplicates(df):                  #Detects duplicate rows in the dataf
             recommendation=[
                 "Remove duplicate rows",
                 "Check data collection pipeline"
+            ]
+        )
+    return None
+
+def detect_group_leakage(df, target_column, uniqueness_min=0.01, uniqueness_max=0.8, group_purity_threshold=0.9, feature_constancy_threshold=0.9):
+    """
+    Detects group leakage where a single entity (e.g., user, patient) appears multiple times,
+    This can cause two types of leakage:
+    1. Target Leakage: The target is highly consistent for an entity.
+    2. Entity Feature Leakage: Other features are constant for an entity, acting as a proxy for its ID.
+    """
+    leakage_evidence = {}  # Dict to store evidence: {group_col: [reason1, reason2]}
+    feature_cols = [col for col in df.columns if col != target_column]
+
+    for col in feature_cols:
+        # --- Step 1: Identify candidate grouping columns based on cardinality ---
+        n_unique = df[col].nunique()
+        n_total = len(df)
+
+        if n_unique <= 1 or n_total == 0:
+            continue
+
+        uniqueness_ratio = n_unique / n_total
+
+        # A grouping column should not be a constant, but also not a unique identifier
+        if not (uniqueness_min < uniqueness_ratio < uniqueness_max):
+            continue
+
+        # 'col' is a candidate grouping column.
+
+        # --- Step 2: Prepare data for group analysis ---
+        # We only care about groups that appear more than once.
+        group_sizes = df.groupby(col).size()
+        multi_member_group_ids = group_sizes[group_sizes > 1].index
+
+        if len(multi_member_group_ids) == 0:
+            continue
+
+        # Filter the dataframe to only include rows from multi-member groups
+        multi_member_df = df[df[col].isin(multi_member_group_ids)].copy()
+
+        # --- Signal A: Check for Target Consistency within groups ---
+        is_categorical_target = df[target_column].dtype == 'object' or df[target_column].nunique() < 20
+
+        if is_categorical_target:
+            def get_purity(group):
+                if group.empty or group.value_counts().empty: return 0.0
+                return group.value_counts().iloc[0] / len(group)
+
+            group_purity = multi_member_df.groupby(col)[target_column].apply(get_purity)
+
+            if not group_purity.empty and (avg_purity := group_purity.mean()) > group_purity_threshold:
+                leakage_evidence.setdefault(col, []).append(f"High target consistency (avg. purity: {avg_purity:.2f})")
+        else: # Numerical Target
+            intra_group_std = multi_member_df.groupby(col)[target_column].std().fillna(0)
+            avg_intra_group_std = intra_group_std.mean()
+            overall_std = multi_member_df[target_column].std()
+
+            if overall_std > 1e-6 and (avg_intra_group_std / overall_std) < 0.1:
+                leakage_evidence.setdefault(col, []).append("Low target variance within groups")
+
+        # --- Signal B: Check for Entity Feature Constancy ---
+        constant_features = []
+        other_features = [c for c in feature_cols if c != col]
+
+        if other_features:
+            grouped_by_col = multi_member_df.groupby(col)
+
+            for feature in other_features:
+                feature_uniqueness_per_group = grouped_by_col[feature].nunique()
+                num_constant_groups = (feature_uniqueness_per_group == 1).sum()
+                proportion_constant = num_constant_groups / len(multi_member_group_ids)
+
+                if proportion_constant > feature_constancy_threshold:
+                    constant_features.append(feature)
+
+        if constant_features:
+            leakage_evidence.setdefault(col, []).append(f"Constant entity features: {', '.join(constant_features)}")
+
+    if not leakage_evidence:
+        return None
+
+    # --- Step 3: Format findings ---
+    final_evidence = []
+    for group_col, reasons in leakage_evidence.items():
+        final_evidence.append(f"Grouping column '{group_col}': {'; '.join(reasons)}")
+
+    if final_evidence:
+        return Finding(
+            title="Group leakage risk detected",
+            severity="HIGH",
+            description="Columns were found that group data points (e.g., user_id, session_id). This can cause leakage if groups are split across train/test sets.",
+            evidence=final_evidence,
+            recommendation=[
+                "Use GroupKFold or a similar group-aware splitting strategy, using the identified grouping column(s).",
+                "Ensure that all data for a given group ID is in the same split (train or test)."
             ]
         )
     return None
@@ -136,7 +236,14 @@ def detect_feature_importance_leakage(X, y, threshold=0.30):            #Detects
     # Use a small portion of data to keep it fast
     X_train, X_test, y_train, y_test = train_test_split(X_processed, y_processed, test_size=0.2, random_state=42)
     
-    model = RandomForestClassifier(n_estimators=20, random_state=42, n_jobs=-1)
+    # Determine if it's a classification or regression problem to choose the right model
+    is_classification = y.dtype == 'object' or y.nunique() < 20
+
+    if is_classification:
+        model = RandomForestClassifier(n_estimators=20, random_state=42, n_jobs=-1)
+    else:
+        model = RandomForestRegressor(n_estimators=20, random_state=42, n_jobs=-1)
+
     model.fit(X_train, y_train)
     
     
@@ -272,7 +379,7 @@ def detect_temporal_leakage(df, target_col, threshold=0.4):
 
 def print_report(findings, shape):
 
-    print(f"\n🛡️ LeakGaurd Report (v{__version__})")
+    print(f"\n🛡️ LeakGuard Report (v{__version__})")
     print("="*50)
     print(f"Dataset shape: {shape}\n")
     
