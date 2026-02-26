@@ -49,7 +49,7 @@ LeakGuard functions as a **safety gate** within the ML pipeline.
 
 ---
 
-## Features (Version 1)
+## Features
 
 LeakGuard V1 provides:
 
@@ -59,6 +59,7 @@ LeakGuard V1 provides:
 * Automatic column type detection
 * Identifier column detection
 * Duplicate row detection
+* Group leakage detection (e.g., entity overlap)
 * High correlation detection with target
 * Feature importance–based leakage detection
 * Temporal leakage detection
@@ -100,6 +101,7 @@ LeakGuard follows a modular inspection pipeline:
 ### Detection Engines
 
 * Identifier detector
+* Group leakage detector
 * Duplicate detector
 * Correlation detector
 * Feature importance detector
@@ -121,6 +123,10 @@ Columns with extremely high uniqueness ratios are flagged as potential identifie
 
 Duplicate rows are detected as they can artificially inflate model performance.
 
+### Group Leakage Detection
+
+Detects if the dataset contains groups (e.g., User IDs) that appear across multiple rows. If these groups have highly consistent targets or constant features, splitting them randomly can lead to leakage (entity leakage).
+
 ### Correlation Detection
 
 Features exhibiting unusually high correlation with the target are flagged as possible leakage proxies.
@@ -131,10 +137,7 @@ A lightweight RandomForest model is trained on internally split data. Features w
 
 ### Temporal Leakage Detection
 
-
-### Temporal Leakage Detection
-
-Identifies potential datetime columns and checks for high target autocorrelation when the data is sorted by time. High autocorrelation indicates time-dependence, meaning random splits could leak future information into the training set.
+Identifies potential datetime columns and checks for signals like high target autocorrelation, regular time spacing, or high timestamp uniqueness. These indicate time-dependence, meaning random splits could leak future information into the training set.
 
 ---
 
