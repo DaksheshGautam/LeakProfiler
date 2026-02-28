@@ -1,4 +1,4 @@
-__version__ = "0.4"
+__version__ = "0.5.0"
 
 import pandas as pd
 import numpy as np
@@ -45,10 +45,15 @@ def run_leakguard(file_path, target_column):        #Main function to run the Le
     # 4. Generate Report
     print_report(findings, df.shape)
 
-def detect_identifiers(df, threshold=0.95):         #Detects columns that are likely identifiers based on uniqueness.
+def detect_identifiers(df, threshold=None):         #Detects columns that are likely identifiers based on uniqueness.
     
     if len(df) == 0:
         return None
+
+    if threshold is None:
+        # Adaptive threshold: 1 - (1 / sqrt(n))
+        # As n increases, threshold approaches 1.0 (stricter).
+        threshold = 1 - (1 / np.sqrt(len(df)))
 
     identifier_cols = []
     for col in df.columns:
@@ -188,7 +193,7 @@ def detect_group_leakage(df, target_column, uniqueness_min=0.01, uniqueness_max=
         )
     return None
 
-def detect_high_correlation(X, y, target_name=None, threshold=0.8):           #Detects features with high correlation to the target.
+def detect_high_correlation(X, y, target_name=None, threshold=None):           #Detects features with high correlation to the target.
 
     y_numeric = y                               # Ensure y is numeric for correlation calculation
     if y.dtype == 'object':
@@ -219,9 +224,15 @@ def detect_high_correlation(X, y, target_name=None, threshold=0.8):           #D
     
     correlations = numeric_df_corr.corr()['target'].abs().sort_values(ascending=False)      # Calculate correlations
 
-
+    if threshold is None:
+        # Adaptive threshold: Mean + 3*Std
+        # We enforce a minimum floor (0.75) to avoid flagging noise in low-correlation datasets.
+        corr_mean = correlations.mean()
+        corr_std = correlations.std() if len(correlations) > 1 else 0
+        
+        threshold = max(corr_mean + 3 * corr_std, 0.75)
     
-    high_corr_features = correlations[correlations > threshold]          # Filter high correlations (excluding target itself)
+    high_corr_features = correlations[correlations > threshold]          # Filter high correlations
     
     evidence = high_corr_features.index.tolist()
     
@@ -242,7 +253,7 @@ def detect_high_correlation(X, y, target_name=None, threshold=0.8):           #D
     return None
 
 
-def detect_feature_importance_leakage(X, y, target_name=None, threshold=0.30):            #Detects leakage using feature importance from a RandomForest model.
+def detect_feature_importance_leakage(X, y, target_name=None, threshold=None):            #Detects leakage using feature importance from a RandomForest model.
     
     
     X_processed = X.copy()                      # Preprocess data: handle categorical features and NaNs
@@ -284,7 +295,14 @@ def detect_feature_importance_leakage(X, y, target_name=None, threshold=0.30):  
     
     importances = pd.Series(model.feature_importances_, index=X_processed.columns)          # Get feature importances
     
-    high_importance_features = importances[importances > threshold].index.tolist()          # Filter high importance features
+    if threshold is None:
+        # Adaptive logic: > 2x Median OR > 40% total importance
+        # Added safety: > 2x Median is only valid if importance is also > 0.10 (to ignore flat distributions)
+        median_imp = importances.median()
+        mask = ((importances > 2 * median_imp) & (importances > 0.10)) | (importances > 0.40)
+        high_importance_features = importances[mask].index.tolist()
+    else:
+        high_importance_features = importances[importances > threshold].index.tolist()          # Filter high importance features
     
     # Final safety filter: Remove target-related names from evidence list
     high_importance_features = [f for f in high_importance_features if f not in cols_to_drop]
