@@ -1,4 +1,4 @@
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 
 import argparse
 import importlib
@@ -74,6 +74,9 @@ def run_leakguard(
             if f := func(*args):
                 findings.append(f)
             progress.advance(task)
+
+    cross_findings = infer_cross_detector_findings(findings, stability)
+    findings.extend(cross_findings)
 
     console = Console()
     advice = advisory_logic(findings, df, confidence, stability)
@@ -318,6 +321,115 @@ def build_next_actions(findings, splitting_strategy, stability):
 
     actions.sort(key=lambda x: (priority_rank.get(x["priority"], 99), x["action"].lower()))
     return actions
+
+
+def _as_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    return [str(value)]
+
+
+def _extract_quoted_tokens(text_items):
+    tokens = set()
+    for item in text_items:
+        for match in re.findall(r"'([^']+)'", str(item)):
+            token = match.strip()
+            if token:
+                tokens.add(token)
+    return tokens
+
+
+def _get_finding_by_title(findings, title):
+    return next((f for f in findings if f.title == title), None)
+
+
+def infer_cross_detector_findings(findings, stability):
+    composite_findings = []
+
+    corr_finding = _get_finding_by_title(findings, "High correlation with target")
+    importance_finding = _get_finding_by_title(findings, "High feature importance detected")
+    group_finding = _get_finding_by_title(findings, "Group leakage risk detected")
+    identifier_finding = _get_finding_by_title(findings, "Identifier columns detected")
+    temporal_finding = _get_finding_by_title(findings, "Temporal leakage risk")
+
+    corr_features = set(_as_list(corr_finding.evidence)) if corr_finding else set()
+    importance_features = set(_as_list(importance_finding.evidence)) if importance_finding else set()
+    identifier_cols = set(_as_list(identifier_finding.evidence)) if identifier_finding else set()
+
+    group_cols = set()
+    if group_finding:
+        group_cols = _extract_quoted_tokens(_as_list(group_finding.evidence))
+
+    temporal_cols = set()
+    if temporal_finding:
+        temporal_cols = _extract_quoted_tokens(_as_list(temporal_finding.evidence))
+
+    overlap_proxy = sorted(corr_features.intersection(importance_features))
+    if overlap_proxy:
+        composite_findings.append(
+            Finding(
+                title="Cross-detector proxy leakage consensus",
+                category="Cross-Detector",
+                severity="HIGH",
+                description="The same features were flagged by both correlation and feature-importance detectors, indicating strong proxy leakage risk.",
+                evidence=overlap_proxy,
+                recommendation=[
+                    "Prioritize manual audit of these overlapping features",
+                    "Remove features that are unavailable at prediction time"
+                ]
+            )
+        )
+
+    overlap_entity = sorted(identifier_cols.intersection(group_cols))
+    if overlap_entity:
+        composite_findings.append(
+            Finding(
+                title="Cross-detector entity memorization risk",
+                category="Cross-Detector",
+                severity="HIGH",
+                description="Identifier-like columns overlap with grouping columns, increasing the chance that the model memorizes entities instead of learning general patterns.",
+                evidence=overlap_entity,
+                recommendation=[
+                    "Exclude overlapping identifier/group columns from training features",
+                    "Use strict group-aware validation with non-overlapping entities"
+                ]
+            )
+        )
+
+    temporal_overlap = sorted(temporal_cols.intersection(corr_features.union(importance_features)))
+    if temporal_overlap:
+        composite_findings.append(
+            Finding(
+                title="Cross-detector temporal proxy risk",
+                category="Cross-Detector",
+                severity="HIGH",
+                description="Time-related columns also appear among highly predictive features, suggesting potential future-information leakage.",
+                evidence=temporal_overlap,
+                recommendation=[
+                    "Validate with strict chronological splits",
+                    "Drop or lag time-derived features that leak future information"
+                ]
+            )
+        )
+
+    if stability.get("level") != "Stable" and (corr_finding or importance_finding):
+        composite_findings.append(
+            Finding(
+                title="Cross-detector confidence caution",
+                category="Cross-Detector",
+                severity="MEDIUM",
+                description="Strong statistical leakage signals were found under unstable data conditions; rankings may be sensitive to small data changes.",
+                evidence=stability.get("message") or "Analysis instability detected",
+                recommendation=[
+                    "Re-run leakage analysis after increasing sample size or reducing dimensionality",
+                    "Confirm suspicious features across multiple data slices or folds"
+                ]
+            )
+        )
+
+    return composite_findings
 
 
 def detect_identifiers(df, threshold=None):
@@ -568,7 +680,7 @@ def detect_temporal_leakage(df, target_col, threshold=0.4):
     date_cols = df.select_dtypes(include=['datetime', 'datetimetz']).columns.tolist()
 
     candidate_cols = [
-        c for c in df.select_dtypes(include=['object']).columns
+        c for c in df.select_dtypes(include=['object', 'string']).columns
         if any(x in c.lower() for x in ['date', 'time', 'year', 'month', 'day'])
     ]
 
@@ -671,7 +783,7 @@ def render_report(findings, shape):
         "LOW": "cyan"
     }
 
-    category_order = {"Structural": 3, "Statistical": 2, "Hygiene": 1}
+    category_order = {"Cross-Detector": 4, "Structural": 3, "Statistical": 2, "Hygiene": 1}
     severity_order = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
 
     findings = sorted(findings, key=lambda f: (category_order.get(f.category, 0), severity_order.get(f.severity, 0)), reverse=True)

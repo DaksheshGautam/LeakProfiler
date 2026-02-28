@@ -8,7 +8,7 @@ LeakGuard does **not** perform data cleaning, feature engineering, or modeling. 
 
 ---
 
-## Features (Version 0.8.0)
+## Features (Version 0.9.0)
 
 *   **Dataset Loading & Profiling**: Ingests a CSV and profiles its structure.
 *   **Leakage Detectors**:
@@ -23,8 +23,29 @@ LeakGuard does **not** perform data cleaning, feature engineering, or modeling. 
 *   **Analysis Stability**: Warns for very small datasets and high-dimensional instability.
 *   **Validation Advisory**: Recommends split strategy (`TimeSeriesSplit`, `GroupKFold`, or standard split).
 *   **Next Actions Checklist**: Deduplicated, priority-based (`P1/P2/P3`) checklist with reasons.
+*   **Cross-Detector Reasoning**: Adds composite findings by combining evidence across detectors (reported as `Cross-Detector` category).
 *   **JSON Export**: Export report + checklist to stdout, file, or Python payload.
 *   **Notebook Export Button (Optional)**: In-notebook button to export JSON.
+
+---
+
+## Cross-Detector Reasoning
+
+After individual detectors run, LeakGuard performs a second-pass inference step to identify multi-signal risks.
+
+Current cross-detector rules include:
+
+* Correlation + Feature Importance overlap on the same feature → **Cross-detector proxy leakage consensus**.
+* Identifier + Group Leakage overlap on the same column/entity key → **Cross-detector entity memorization risk**.
+* Temporal signals + highly predictive feature overlap → **Cross-detector temporal proxy risk**.
+* Unstable analysis conditions + strong statistical findings → **Cross-detector confidence caution**.
+
+These composite findings are integrated into:
+
+* Findings summary table
+* Risk score/dashboard
+* Validation advisory and checklist
+* JSON export payload
 
 ---
 
