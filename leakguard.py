@@ -1,4 +1,4 @@
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 import pandas as pd
 import numpy as np
@@ -46,16 +46,34 @@ def run_leakguard(file_path, target_column):        #Main function to run the Le
     print_report(findings, df.shape)
 
     # 5. Get overall advice
-    advice = advisory_logic(findings)
+    advice = advisory_logic(findings, df)
     print_advice(advice)
 
-def advisory_logic(findings):
+def get_adaptive_weights(dataframe):
+    """
+    Dynamically adjusts severity weights based on dataset size.
+    - For large datasets, low-severity issues are amplified.
+    - For small datasets, high-severity issues are more critical.
+    """
+    n_samples = len(dataframe)
+    weights = {"LOW": 1, "MEDIUM": 3, "HIGH": 5} # Base weights
+
+    # For very large datasets, even "LOW" severity issues can be more significant
+    # as they might indicate systematic problems.
+    if n_samples > 50000:
+        weights["LOW"] = 2
+        weights["MEDIUM"] = 4
     
-    severity_weights = {
-        "LOW": 1,
-        "MEDIUM": 3,
-        "HIGH": 5
-    }
+    # For small datasets, "HIGH" severity findings are critical as they can 
+    # easily lead to severe overfitting.
+    if n_samples < 1000:
+        weights["HIGH"] = 7
+        
+    return weights
+
+def advisory_logic(findings, df):
+    
+    severity_weights = get_adaptive_weights(df)
 
     total_score = 0
     for finding in findings:

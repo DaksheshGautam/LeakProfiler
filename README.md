@@ -65,6 +65,7 @@ LeakGuard v0.6.0 provides:
 * Temporal leakage detection
 * Structured console reporting
 * **Advisory System**: Provides a risk score, recommended splitting strategy, and dataset tips.
+* Adaptive risk scoring that adjusts based on dataset size
 
 The tool **flags suspicious features only** and does not automatically modify datasets.
 
