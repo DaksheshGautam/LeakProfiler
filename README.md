@@ -64,6 +64,7 @@ LeakGuard V1 provides:
 * Feature importance–based leakage detection
 * Temporal leakage detection
 * Structured console reporting
+* Adaptive risk scoring that adjusts based on dataset size
 
 The tool **flags suspicious features only** and does not automatically modify datasets.
 
@@ -187,8 +188,6 @@ Or run directly from notebook using the provided functions.
 
 ## Future Work
 
-* Risk scoring
-* Recommendations
 * UI interface
 * Automated feature removal
 * HTML reporting
