@@ -51,7 +51,7 @@ LeakGuard functions as a **safety gate** within the ML pipeline.
 
 ## Features
 
-LeakGuard V1 provides:
+LeakGuard v0.6.0 provides:
 
 * Dataset loading
 * Target separation
@@ -64,6 +64,7 @@ LeakGuard V1 provides:
 * Feature importance–based leakage detection
 * Temporal leakage detection
 * Structured console reporting
+* **Advisory System**: Provides a risk score, recommended splitting strategy, and dataset tips.
 
 The tool **flags suspicious features only** and does not automatically modify datasets.
 
@@ -110,6 +111,7 @@ LeakGuard follows a modular inspection pipeline:
 
 * Aggregate findings
 * Generate readable report
+* Provide advisory recommendations
 
 ---
 
@@ -162,6 +164,13 @@ High Importance:
 
 Temporal Leakage Risks:
 - High Target Autocorrelation (0.85) when sorted by 'transaction_date'. Data is time-dependent; use TimeSeriesSplit instead of random split.
+
+========== Advisory ==========
+Leakage Risk Score: 12
+Recommended Splitting Strategy: TimeSeriesSplit
+- High risk of data leakage. Manual inspection of features is highly recommended.
+- Remove identifier columns before training.
+- Investigate high-correlation features.
 ```
 
 ---
@@ -187,8 +196,6 @@ Or run directly from notebook using the provided functions.
 
 ## Future Work
 
-* Risk scoring
-* Recommendations
 * UI interface
 * Automated feature removal
 * HTML reporting
