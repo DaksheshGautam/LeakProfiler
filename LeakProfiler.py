@@ -12,7 +12,6 @@ from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.preprocessing import LabelEncoder
 from dataclasses import dataclass
 from typing import List, Any
-
 from rich.console import Console, Group
 from rich.table import Table
 from rich.panel import Panel
@@ -78,6 +77,9 @@ def run_leakprofiler(
 
     cross_findings = infer_cross_detector_findings(findings, stability)
     findings.extend(cross_findings)
+
+    benign_findings = infer_benign_pattern_findings(findings, df, confidence, stability)
+    findings.extend(benign_findings)
 
     console = Console()
     advice = advisory_logic(findings, df, confidence, stability)
@@ -241,10 +243,12 @@ def check_analysis_stability(df):
 
 def advisory_logic(findings, df, confidence, stability):
     severity_weights = get_adaptive_weights(df)
+    risk_findings = [f for f in findings if f.category != "Benign-Pattern"]
+    benign_findings = [f for f in findings if f.category == "Benign-Pattern"]
 
     total_score = 0
     severity_counts = {"HIGH": 0, "MEDIUM": 0, "LOW": 0}
-    for finding in findings:
+    for finding in risk_findings:
         total_score += severity_weights.get(finding.severity, 0)
         if finding.severity in severity_counts:
             severity_counts[finding.severity] += 1
@@ -255,12 +259,13 @@ def advisory_logic(findings, df, confidence, stability):
         "leakage_score": total_score,
         "severity_counts": severity_counts,
         "total_findings": len(findings),
+        "benign_findings": len(benign_findings),
         "confidence": confidence,
         "stability": stability
     }
 
-    has_temporal = any(f.title == "Temporal leakage risk" for f in findings)
-    has_group = any(f.title == "Group leakage risk detected" for f in findings)
+    has_temporal = any(f.title == "Temporal leakage risk" for f in risk_findings)
+    has_group = any(f.title == "Group leakage risk detected" for f in risk_findings)
 
     if has_temporal:
         advice["splitting_strategy"] = "TimeSeriesSplit"
@@ -274,7 +279,7 @@ def advisory_logic(findings, df, confidence, stability):
     else:
         advice["dataset_tips"].append("Low risk of data leakage, but it's good practice to review the findings.")
 
-    if not findings:
+    if not risk_findings:
         advice["dataset_tips"] = ["No leakage risks detected. Dataset looks safe for standard modeling."]
 
     if advice["stability"]["message"]:
@@ -315,6 +320,8 @@ def build_next_actions(findings, splitting_strategy, stability):
             }
 
     for finding in findings:
+        if finding.category == "Benign-Pattern":
+            continue
         priority = severity_priority.get(finding.severity, "P3")
         why = f"{finding.title} ({finding.severity})"
         for rec in finding.recommendation:
@@ -451,6 +458,104 @@ def infer_cross_detector_findings(findings, stability):
         )
 
     return composite_findings
+
+
+def _extract_row_count(evidence):
+    match = re.search(r"(\d+)\s+rows", str(evidence))
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def infer_benign_pattern_findings(findings, df, confidence, stability):
+    benign_findings = []
+
+    corr_finding = _get_finding_by_title(findings, "High correlation with target")
+    importance_finding = _get_finding_by_title(findings, "High feature importance detected")
+    group_finding = _get_finding_by_title(findings, "Group leakage risk detected")
+    temporal_finding = _get_finding_by_title(findings, "Temporal leakage risk")
+    duplicates_finding = _get_finding_by_title(findings, "Duplicate rows detected")
+    cross_temporal = _get_finding_by_title(findings, "Cross-detector temporal proxy risk")
+    cross_proxy = _get_finding_by_title(findings, "Cross-detector proxy leakage consensus")
+    identifier_finding = _get_finding_by_title(findings, "Identifier columns detected")
+    high_risk_findings = [f for f in findings if f.severity == "HIGH" and f.category != "Benign-Pattern"]
+
+    if duplicates_finding and len(df) > 0:
+        duplicate_rows = _extract_row_count(duplicates_finding.evidence)
+        duplicate_ratio = (duplicate_rows / len(df)) if duplicate_rows is not None else None
+        duplicate_ratio_threshold = 0.002 if len(df) >= 5000 else 0.001
+        if duplicate_ratio is not None and duplicate_ratio <= duplicate_ratio_threshold:
+            benign_findings.append(
+                Finding(
+                    title="Benign pattern: sparse duplicate noise",
+                    category="Benign-Pattern",
+                    severity="LOW",
+                    description="A very small proportion of duplicates was detected and may represent benign ingestion noise rather than systematic leakage.",
+                    evidence=f"{duplicate_rows} duplicate rows out of {len(df)} ({duplicate_ratio:.2%})",
+                    recommendation=[
+                        "Remove duplicates as hygiene, but treat as low-priority leakage concern",
+                        "Monitor duplicate rate in future data refreshes"
+                    ]
+                )
+            )
+
+    if (
+        importance_finding
+        and not corr_finding
+        and not group_finding
+        and not temporal_finding
+        and not identifier_finding
+        and not cross_proxy
+        and stability.get("level") == "Stable"
+        and confidence.get("level") == "High"
+        and len(high_risk_findings) == 0
+    ):
+        benign_findings.append(
+            Finding(
+                title="Benign pattern: isolated strong predictor",
+                category="Benign-Pattern",
+                severity="LOW",
+                description="A strong feature-importance signal appears without corroborating leakage signals, which can indicate a genuinely informative pre-outcome feature.",
+                evidence=_as_list(importance_finding.evidence),
+                recommendation=[
+                    "Keep feature under review, but treat as potentially legitimate signal",
+                    "Validate consistency across fresh holdout data"
+                ]
+            )
+        )
+
+    if temporal_finding and not corr_finding and not cross_temporal and not group_finding:
+        temporal_evidence = _as_list(temporal_finding.evidence)
+        has_high = any("High Target Autocorrelation" in e for e in temporal_evidence)
+        has_moderate = any("Moderate Target Autocorrelation" in e for e in temporal_evidence)
+        has_regular = any("Regular Time Spacing" in e for e in temporal_evidence)
+        has_high_uniqueness = any("High Timestamp Uniqueness" in e for e in temporal_evidence)
+
+        if (
+            temporal_evidence
+            and has_moderate
+            and not has_high
+            and not has_regular
+            and not has_high_uniqueness
+            and stability.get("level") == "Stable"
+            and confidence.get("level") in {"High", "Medium"}
+            and len(high_risk_findings) == 0
+        ):
+            benign_findings.append(
+                Finding(
+                    title="Benign pattern: weak temporal structure",
+                    category="Benign-Pattern",
+                    severity="LOW",
+                    description="Temporal structure is present but only moderate and not corroborated by other predictive leakage signals.",
+                    evidence=temporal_evidence,
+                    recommendation=[
+                        "Prefer chronological validation as precaution",
+                        "Do not treat this temporal signal alone as definitive leakage"
+                    ]
+                )
+            )
+
+    return benign_findings
 
 
 def detect_identifiers(df, threshold=None):
@@ -804,7 +909,7 @@ def render_report(findings, shape):
         "LOW": "cyan"
     }
 
-    category_order = {"Cross-Detector": 4, "Structural": 3, "Statistical": 2, "Hygiene": 1}
+    category_order = {"Cross-Detector": 4, "Structural": 3, "Statistical": 2, "Hygiene": 1, "Benign-Pattern": 0}
     severity_order = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
 
     findings = sorted(findings, key=lambda f: (category_order.get(f.category, 0), severity_order.get(f.severity, 0)), reverse=True)
@@ -853,6 +958,7 @@ def render_advice(advice):
 
     dashboard_text = f"""
 Total Findings      : {advice['total_findings']}
+Benign Findings     : {advice.get('benign_findings', 0)}
 High Severity       : {advice['severity_counts']['HIGH']}
 Medium Severity     : {advice['severity_counts']['MEDIUM']}
 Low Severity        : {advice['severity_counts']['LOW']}
@@ -919,6 +1025,7 @@ def build_json_export_payload(file_path, target_column, shape, findings, advice)
         },
         "summary": {
             "total_findings": advice.get("total_findings"),
+            "benign_findings": advice.get("benign_findings", 0),
             "severity_counts": _to_json_safe(advice.get("severity_counts", {})),
             "risk_score": advice.get("leakage_score"),
             "splitting_strategy": advice.get("splitting_strategy"),

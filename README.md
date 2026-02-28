@@ -24,6 +24,7 @@ LeakProfiler does **not** perform data cleaning, feature engineering, or modelin
 *   **Validation Advisory**: Recommends split strategy (`TimeSeriesSplit`, `GroupKFold`, or standard split).
 *   **Next Actions Checklist**: Deduplicated, priority-based (`P1/P2/P3`) checklist with reasons.
 *   **Cross-Detector Reasoning**: Adds composite findings by combining evidence across detectors (reported as `Cross-Detector` category).
+*   **Benign Pattern Detection**: Adds conservative, explainable low-risk contextual findings (`Benign-Pattern`) for likely non-leakage signals.
 *   **JSON Export**: Export report + checklist to stdout, file, or Python payload.
 *   **Notebook Export Button (Optional)**: In-notebook button to export JSON.
 
@@ -46,6 +47,30 @@ These composite findings are integrated into:
 * Risk score/dashboard
 * Validation advisory and checklist
 * JSON export payload
+
+---
+
+## Benign Pattern Detection
+
+After base detectors and cross-detector reasoning, LeakProfiler runs a conservative benign-pattern pass to identify signals that may look suspicious statistically but are often operationally normal.
+
+Design principles:
+
+* **Do not suppress risk findings**: benign findings are additive context, not replacements.
+* **Exclude from risk score**: `Benign-Pattern` findings are not counted in leakage severity totals.
+* **Conservative edge-case handling**: benign tags are blocked when strong corroborating risk signals exist.
+
+Current benign rules (tuned):
+
+* **Sparse duplicate noise**: duplicate ratio must be extremely small (adaptive threshold by dataset size).
+* **Isolated strong predictor**: allowed only when no corroborating correlation/group/temporal/identifier risk exists, with stable + high-confidence analysis and no HIGH-severity findings.
+* **Weak temporal structure**: only moderate temporal signal without high autocorrelation, regular spacing, high timestamp uniqueness, group risk, or temporal cross-detector overlap.
+
+Output behavior:
+
+* Dashboard now includes a `Benign Findings` count.
+* Benign findings appear in the findings table as category `Benign-Pattern`.
+* JSON summary includes `benign_findings`.
 
 ---
 
