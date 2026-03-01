@@ -1,4 +1,4 @@
-__version__ = "1.0.0a1"
+__version__ = "1.0.0a2"
 FUNC_NAME = "LeakProfiler"
 
 ADVISORY_CONFIG = {
@@ -31,6 +31,7 @@ ADVISORY_CONFIG = {
 import argparse
 import importlib
 import json
+import sys
 import pandas as pd
 import numpy as np
 import re
@@ -1256,12 +1257,35 @@ def build_json_export_payload(file_path, target_column, shape, findings, advice)
 
 
 def _parse_args():
+    dash_variants = ("\u2013", "\u2014", "\u2212")
+
+    def _normalize_dash_prefix(argv):
+        normalized = []
+        for arg in argv:
+            if not arg:
+                normalized.append(arg)
+                continue
+
+            prefix_len = 0
+            while prefix_len < len(arg) and arg[prefix_len] in dash_variants:
+                prefix_len += 1
+
+            if prefix_len > 0:
+                normalized_dash = "--" if prefix_len == 1 else "-" * prefix_len
+                normalized.append(normalized_dash + arg[prefix_len:])
+            else:
+                normalized.append(arg)
+
+        return normalized
+
+    argv = _normalize_dash_prefix(sys.argv[1:])
+
     parser = argparse.ArgumentParser(description=f"{FUNC_NAME} data leakage scanner")
     parser.add_argument("--file", required=True, help="Path to CSV dataset")
-    parser.add_argument("--target", required=True, help="Target column name")
+    parser.add_argument("--target", "--target-column", "-t", required=True, help="Target column name")
     parser.add_argument("--json", action="store_true", help="Print JSON export to stdout")
     parser.add_argument("--json-path", default=None, help="Write JSON export to this path")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def main():

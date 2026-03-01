@@ -3,6 +3,7 @@ import pandas as pd
 from LeakProfiler import (
     ADVISORY_CONFIG,
     Finding,
+    _parse_args,
     advisory_logic,
     determine_splitting_strategy,
     estimate_finding_confidence,
@@ -110,3 +111,21 @@ def test_high_risk_gate_allows_high_with_corroboration_and_confidence():
 
     assert profile["level"] == "HIGH"
     assert any("HIGH gate status" in reason for reason in profile["rationale"])
+
+
+def test_parse_args_accepts_unicode_dash_for_target(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "leakprofiler",
+            "--file",
+            "dataset.csv",
+            "—target",
+            "label",
+        ],
+    )
+
+    args = _parse_args()
+
+    assert args.file == "dataset.csv"
+    assert args.target == "label"

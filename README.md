@@ -8,7 +8,7 @@ LeakProfiler inspects a dataset before training and flags structural/statistical
 
 ## Release Status
 
-**Current release:** `1.0.0a1` (**Alpha**)
+**Current release:** `1.0.0a2` (**Alpha**)
 
 This alpha is production-installable from PyPI, but scoring policy and heuristics may still evolve based on early feedback.
 
@@ -42,7 +42,7 @@ This alpha is production-installable from PyPI, but scoring policy and heuristic
 ### Option A: Install from PyPI (recommended)
 
 ```bash
-pip install leakprofiler==1.0.0a1
+pip install leakprofiler==1.0.0a2
 ```
 
 ### Option B: Local development install
@@ -185,20 +185,20 @@ python -m twine check dist/*
 ### TestPyPI
 
 ```bash
-python -m twine upload --repository testpypi dist/leakprofiler-1.0.0a1*
+python -m twine upload --repository testpypi dist/leakprofiler-1.0.0a2*
 ```
 
 ### PyPI
 
 ```bash
-python -m twine upload dist/leakprofiler-1.0.0a1*
+python -m twine upload dist/leakprofiler-1.0.0a2*
 ```
 
 ### Tag suggestion
 
 ```bash
-git tag -a v1.0.0-alpha.1 -m "LeakProfiler 1.0.0 alpha 1"
-git push origin v1.0.0-alpha.1
+git tag -a v1.0.0-alpha.2 -m "LeakProfiler 1.0.0 alpha 2"
+git push origin v1.0.0-alpha.2
 ```
 
 ---
