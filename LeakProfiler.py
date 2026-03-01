@@ -1,5 +1,27 @@
-__version__ = "0.10.0"
+__version__ = "0.11.0"
 FUNC_NAME = "LeakProfiler"
+
+ADVISORY_CONFIG = {
+    "severity_base": {"HIGH": 7.0, "MEDIUM": 4.0, "LOW": 1.5},
+    "category_weight": {
+        "Structural": 1.0,
+        "Statistical": 0.9,
+        "Cross-Detector": 1.1,
+        "Hygiene": 0.4
+    },
+    "confidence_factor": {"High": 1.0, "Medium": 0.9, "Low": 0.75},
+    "stability_factor": {"Stable": 1.0, "Warning": 0.9},
+    "risk_thresholds": {"HIGH": 16.0, "MODERATE": 8.0},
+    "corroboration_bonus": {
+        "two_high": 3.0,
+        "one_high_two_medium": 2.0,
+        "three_or_more_findings": 1.0,
+    },
+    "overlap_penalty": {
+        "proxy_overlap": 0.5,
+        "temporal_overlap": 0.35,
+    },
+}
 
 import argparse
 import importlib
@@ -242,39 +264,29 @@ def check_analysis_stability(df):
 
 
 def advisory_logic(findings, df, confidence, stability):
-    severity_weights = get_adaptive_weights(df)
     risk_findings = [f for f in findings if f.category != "Benign-Pattern"]
     benign_findings = [f for f in findings if f.category == "Benign-Pattern"]
 
-    total_score = 0
-    severity_counts = {"HIGH": 0, "MEDIUM": 0, "LOW": 0}
-    for finding in risk_findings:
-        total_score += severity_weights.get(finding.severity, 0)
-        if finding.severity in severity_counts:
-            severity_counts[finding.severity] += 1
+    split_strategy = determine_splitting_strategy(risk_findings)
+    risk_profile = estimate_risk_profile(risk_findings, confidence, stability)
 
     advice = {
-        "splitting_strategy": "Standard (e.g., StratifiedKFold)",
+        "splitting_strategy": split_strategy,
         "dataset_tips": [],
-        "leakage_score": total_score,
-        "severity_counts": severity_counts,
+        "leakage_score": risk_profile["score"],
+        "risk_level": risk_profile["level"],
+        "severity_counts": risk_profile["severity_counts"],
         "total_findings": len(findings),
         "benign_findings": len(benign_findings),
         "confidence": confidence,
-        "stability": stability
+        "stability": stability,
+        "uncertainty": risk_profile["uncertainty"],
+        "risk_rationale": risk_profile["rationale"]
     }
 
-    has_temporal = any(f.title == "Temporal leakage risk" for f in risk_findings)
-    has_group = any(f.title == "Group leakage risk detected" for f in risk_findings)
-
-    if has_temporal:
-        advice["splitting_strategy"] = "TimeSeriesSplit"
-    elif has_group:
-        advice["splitting_strategy"] = "GroupKFold"
-
-    if total_score > 10:
+    if risk_profile["level"] == "HIGH":
         advice["dataset_tips"].append("High risk of data leakage. Manual inspection of features is highly recommended.")
-    elif total_score >= 5:
+    elif risk_profile["level"] == "MODERATE":
         advice["dataset_tips"].append("Moderate risk of data leakage. Review the findings and apply recommended actions.")
     else:
         advice["dataset_tips"].append("Low risk of data leakage, but it's good practice to review the findings.")
@@ -285,9 +297,172 @@ def advisory_logic(findings, df, confidence, stability):
     if advice["stability"]["message"]:
         advice["dataset_tips"].append(advice["stability"]["message"])
 
+    advice["dataset_tips"].append(
+        f"Advisory uncertainty: {advice['uncertainty']['level']} ({advice['uncertainty']['reason']})."
+    )
+
     advice["next_actions"] = build_next_actions(findings, advice["splitting_strategy"], advice["stability"])
 
     return advice
+
+
+def determine_splitting_strategy(risk_findings):
+    has_temporal = any(f.title == "Temporal leakage risk" for f in risk_findings)
+    has_group = any(f.title == "Group leakage risk detected" for f in risk_findings)
+
+    if has_temporal:
+        return "TimeSeriesSplit"
+    if has_group:
+        return "GroupKFold"
+    return "Standard (e.g., StratifiedKFold)"
+
+
+def estimate_risk_profile(risk_findings, confidence, stability):
+    severity_base = ADVISORY_CONFIG["severity_base"]
+    category_weight = ADVISORY_CONFIG["category_weight"]
+
+    confidence_factor = ADVISORY_CONFIG["confidence_factor"].get(confidence.get("level"), 0.9)
+    stability_factor = ADVISORY_CONFIG["stability_factor"].get(stability.get("level"), 0.9)
+
+    contributions = {}
+    contribution_details = []
+    severity_counts = {"HIGH": 0, "MEDIUM": 0, "LOW": 0}
+    for finding in risk_findings:
+        severity_counts[finding.severity] = severity_counts.get(finding.severity, 0) + 1
+        base = severity_base.get(finding.severity, 1.0)
+        category_mult = category_weight.get(finding.category, 0.8)
+        finding_conf = estimate_finding_confidence(finding, risk_findings, confidence, stability)
+        contribution = base * category_mult * confidence_factor * stability_factor * finding_conf["score"]
+        contributions[finding.title] = contribution
+        contribution_details.append({
+            "title": finding.title,
+            "value": round(contribution, 2),
+            "confidence": finding_conf["label"],
+            "confidence_score": round(finding_conf["score"], 2),
+        })
+
+    if severity_counts.get("HIGH", 0) >= 2:
+        corroboration_bonus = ADVISORY_CONFIG["corroboration_bonus"]["two_high"]
+    elif severity_counts.get("HIGH", 0) == 1 and severity_counts.get("MEDIUM", 0) >= 2:
+        corroboration_bonus = ADVISORY_CONFIG["corroboration_bonus"]["one_high_two_medium"]
+    elif len(risk_findings) >= 3:
+        corroboration_bonus = ADVISORY_CONFIG["corroboration_bonus"]["three_or_more_findings"]
+    else:
+        corroboration_bonus = 0.0
+
+    overlap_penalties = []
+    if "Cross-detector proxy leakage consensus" in contributions:
+        penalty = ADVISORY_CONFIG["overlap_penalty"]["proxy_overlap"] * min(
+            contributions.get("High correlation with target", 0.0),
+            contributions.get("High feature importance detected", 0.0),
+        )
+        if penalty > 0:
+            overlap_penalties.append(("proxy overlap de-duplication", penalty))
+
+    if "Cross-detector temporal proxy risk" in contributions and "Temporal leakage risk" in contributions:
+        penalty = ADVISORY_CONFIG["overlap_penalty"]["temporal_overlap"] * contributions.get("Temporal leakage risk", 0.0)
+        if penalty > 0:
+            overlap_penalties.append(("temporal overlap de-duplication", penalty))
+
+    raw_score = sum(contributions.values()) + corroboration_bonus
+    total_penalty = sum(p for _, p in overlap_penalties)
+    calibrated_score = max(raw_score - total_penalty, 0.0)
+
+    if calibrated_score >= ADVISORY_CONFIG["risk_thresholds"]["HIGH"]:
+        level = "HIGH"
+    elif calibrated_score >= ADVISORY_CONFIG["risk_thresholds"]["MODERATE"]:
+        level = "MODERATE"
+    else:
+        level = "LOW"
+
+    uncertainty_points = 0
+    uncertainty_reasons = []
+    if confidence.get("level") == "Low":
+        uncertainty_points += 2
+        uncertainty_reasons.append("low confidence")
+    elif confidence.get("level") == "Medium":
+        uncertainty_points += 1
+        uncertainty_reasons.append("medium confidence")
+
+    if stability.get("level") != "Stable":
+        uncertainty_points += 2
+        uncertainty_reasons.append("analysis instability")
+
+    if len(risk_findings) <= 1:
+        uncertainty_points += 1
+        uncertainty_reasons.append("limited evidence signals")
+
+    if uncertainty_points >= 4:
+        uncertainty_level = "High"
+    elif uncertainty_points >= 2:
+        uncertainty_level = "Medium"
+    else:
+        uncertainty_level = "Low"
+
+    top_contributors = sorted(contribution_details, key=lambda x: x["value"], reverse=True)[:3]
+    if top_contributors:
+        top_parts = [
+            f"{item['title']} ({item['value']:.1f}, {item['confidence']} confidence)"
+            for item in top_contributors
+        ]
+        rationale = [f"Top contributors: {', '.join(top_parts)}"]
+    else:
+        rationale = ["Top contributors: none"]
+    if corroboration_bonus > 0:
+        rationale.append(f"Corroboration bonus applied: +{corroboration_bonus:.1f}")
+    for reason, penalty in overlap_penalties:
+        rationale.append(f"{reason}: -{penalty:.1f}")
+    rationale.append(f"Calibrated risk score: {calibrated_score:.1f}")
+
+    uncertainty_reason_text = ", ".join(uncertainty_reasons) if uncertainty_reasons else "sufficiently stable evidence"
+
+    return {
+        "score": int(round(calibrated_score)),
+        "level": level,
+        "severity_counts": severity_counts,
+        "uncertainty": {
+            "level": uncertainty_level,
+            "reason": uncertainty_reason_text
+        },
+        "rationale": rationale
+    }
+
+
+def estimate_finding_confidence(finding, risk_findings, confidence, stability):
+    score = 0.7
+
+    if finding.category == "Cross-Detector":
+        score += 0.2
+
+    if isinstance(finding.evidence, list) and len(finding.evidence) >= 2:
+        score += 0.1
+
+    if finding.severity == "HIGH":
+        score += 0.05
+
+    if confidence.get("level") == "Low":
+        score -= 0.1
+
+    if stability.get("level") != "Stable" and finding.category == "Statistical":
+        score -= 0.1
+
+    corroborating = [
+        f for f in risk_findings
+        if f.title != finding.title and f.category != finding.category and f.severity in {"HIGH", "MEDIUM"}
+    ]
+    if corroborating:
+        score += 0.05
+
+    score = min(max(score, 0.4), 1.1)
+
+    if score >= 0.9:
+        label = "High"
+    elif score >= 0.7:
+        label = "Medium"
+    else:
+        label = "Low"
+
+    return {"score": score, "label": label}
 
 
 def build_next_actions(findings, splitting_strategy, stability):
@@ -319,7 +494,9 @@ def build_next_actions(findings, splitting_strategy, stability):
                 "why": [why_text] if why_text else []
             }
 
-    for finding in findings:
+    actionable_findings = [f for f in findings if f.category != "Benign-Pattern"]
+
+    for finding in actionable_findings:
         if finding.category == "Benign-Pattern":
             continue
         priority = severity_priority.get(finding.severity, "P3")
@@ -335,7 +512,7 @@ def build_next_actions(findings, splitting_strategy, stability):
     if stability.get("level") != "Stable":
         add_action("P2", "Treat metric estimates as unstable until data size/shape is improved", "Analysis stability warning")
 
-    if not findings:
+    if not actionable_findings:
         add_action("P3", "Proceed with standard leakage-safe modeling workflow", "No leakage findings were detected")
 
     actions = []
@@ -934,9 +1111,10 @@ def render_report(findings, shape):
 
 def render_advice(advice):
     risk_score = advice["leakage_score"]
-    if risk_score > 10:
+    risk_level_value = advice.get("risk_level", "LOW")
+    if risk_level_value == "HIGH":
         risk_level = "[bold red]HIGH[/bold red]"
-    elif risk_score >= 5:
+    elif risk_level_value == "MODERATE":
         risk_level = "[yellow]MODERATE[/yellow]"
     else:
         risk_level = "[green]LOW[/green]"
@@ -966,6 +1144,7 @@ Overall Risk Score  : {risk_score}
 Risk Level          : {risk_level}
 Analysis Confidence : {advice['confidence']['level']} ({advice['confidence']['score']}%)
 Analysis Stability  : {stability_display_text}
+Advisory Uncertainty: {advice.get('uncertainty', {}).get('level', 'Low')}
 """
 
     dashboard = Panel(dashboard_text, title=f"{FUNC_NAME.upper()} DASHBOARD", border_style="green", title_align="center")
@@ -977,6 +1156,11 @@ Notes:
 """
     for tip in advice["dataset_tips"]:
         advice_text += f"• {tip}\n"
+
+    if advice.get("risk_rationale"):
+        advice_text += "\nAdvisory Basis:\n"
+        for reason in advice["risk_rationale"]:
+            advice_text += f"• {reason}\n"
 
     advice_panel = Panel(advice_text.strip(), title="Validation Advisory", border_style="blue")
 
@@ -1028,9 +1212,12 @@ def build_json_export_payload(file_path, target_column, shape, findings, advice)
             "benign_findings": advice.get("benign_findings", 0),
             "severity_counts": _to_json_safe(advice.get("severity_counts", {})),
             "risk_score": advice.get("leakage_score"),
+            "risk_level": advice.get("risk_level"),
             "splitting_strategy": advice.get("splitting_strategy"),
             "confidence": _to_json_safe(advice.get("confidence", {})),
-            "stability": _to_json_safe(advice.get("stability", {}))
+            "stability": _to_json_safe(advice.get("stability", {})),
+            "uncertainty": _to_json_safe(advice.get("uncertainty", {})),
+            "risk_rationale": _to_json_safe(advice.get("risk_rationale", []))
         },
         "dataset_tips": _to_json_safe(advice.get("dataset_tips", [])),
         "next_actions": _to_json_safe(advice.get("next_actions", [])),

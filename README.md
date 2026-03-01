@@ -8,7 +8,7 @@ LeakProfiler does **not** perform data cleaning, feature engineering, or modelin
 
 ---
 
-## Features (Version 0.9.0)
+## Features (Version 0.11.0)
 
 *   **Dataset Loading & Profiling**: Ingests a CSV and profiles its structure.
 *   **Leakage Detectors**:
@@ -25,6 +25,9 @@ LeakProfiler does **not** perform data cleaning, feature engineering, or modelin
 *   **Next Actions Checklist**: Deduplicated, priority-based (`P1/P2/P3`) checklist with reasons.
 *   **Cross-Detector Reasoning**: Adds composite findings by combining evidence across detectors (reported as `Cross-Detector` category).
 *   **Benign Pattern Detection**: Adds conservative, explainable low-risk contextual findings (`Benign-Pattern`) for likely non-leakage signals.
+*   **Principled Advisory Engine**: Uses calibrated evidence scoring, overlap de-duplication, uncertainty estimation, and explainable rationale.
+*   **Config-Driven Advisory Weights**: Advisory scoring uses explicit, tunable config for severity/category weights, thresholds, bonuses, and penalties.
+*   **Per-Finding Confidence**: Each finding gets a confidence estimate that influences contribution to overall risk.
 *   **JSON Export**: Export report + checklist to stdout, file, or Python payload.
 *   **Notebook Export Button (Optional)**: In-notebook button to export JSON.
 
@@ -71,6 +74,25 @@ Output behavior:
 * Dashboard now includes a `Benign Findings` count.
 * Benign findings appear in the findings table as category `Benign-Pattern`.
 * JSON summary includes `benign_findings`.
+
+---
+
+## Principled Advisory Engine
+
+LeakProfiler separates risk estimation from action recommendation:
+
+* **Risk estimation** uses weighted evidence from findings (severity + category + per-finding confidence), then applies:
+    * corroboration bonus when multiple independent signals align,
+    * overlap penalties to reduce double-counting between correlated detectors.
+* **Configuration-driven policy** keeps thresholds and weights explicit and tunable.
+* **Uncertainty estimation** combines confidence level, analysis stability, and evidence sufficiency.
+* **Action recommendation** builds a deduplicated checklist from actionable findings only.
+
+Explainability outputs:
+
+* Dashboard includes `Risk Level` and `Advisory Uncertainty`.
+* Advisory panel includes an `Advisory Basis` section with top contributors, bonuses/penalties, and calibrated score.
+* JSON summary includes `risk_level`, `uncertainty`, and `risk_rationale`.
 
 ---
 
