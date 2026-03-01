@@ -42,6 +42,12 @@ This stable release is validated for broad dataset inspection workflows and pack
 ### Option A: Install from PyPI (recommended)
 
 ```bash
+pip install leakprofiler
+```
+
+For reproducible environments, pin an exact version:
+
+```bash
 pip install leakprofiler==1.0.0
 ```
 
