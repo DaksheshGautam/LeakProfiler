@@ -85,6 +85,7 @@ LeakProfiler separates risk estimation from action recommendation:
     * corroboration bonus when multiple independent signals align,
     * overlap penalties to reduce double-counting between correlated detectors.
 * **Configuration-driven policy** keeps thresholds and weights explicit and tunable.
+* **Strict HIGH gate**: `HIGH` risk is only emitted when corroboration and confidence gates both pass; otherwise it is downgraded to `MODERATE`.
 * **Uncertainty estimation** combines confidence level, analysis stability, and evidence sufficiency.
 * **Action recommendation** builds a deduplicated checklist from actionable findings only.
 

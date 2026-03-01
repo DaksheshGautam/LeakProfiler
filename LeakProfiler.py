@@ -1,4 +1,4 @@
-__version__ = "0.11.0"
+__version__ = "0.12.0"
 FUNC_NAME = "LeakProfiler"
 
 ADVISORY_CONFIG = {
@@ -20,6 +20,11 @@ ADVISORY_CONFIG = {
     "overlap_penalty": {
         "proxy_overlap": 0.5,
         "temporal_overlap": 0.35,
+    },
+    "high_risk_gate": {
+        "require_corroboration": True,
+        "allow_confidence_levels": ["High", "Medium"],
+        "block_on_uncertainty_level": "High",
     },
 }
 
@@ -415,6 +420,31 @@ def estimate_risk_profile(risk_findings, confidence, stability):
     rationale.append(f"Calibrated risk score: {calibrated_score:.1f}")
 
     uncertainty_reason_text = ", ".join(uncertainty_reasons) if uncertainty_reasons else "sufficiently stable evidence"
+
+    high_count = severity_counts.get("HIGH", 0)
+    medium_count = severity_counts.get("MEDIUM", 0)
+    has_cross_detector = any(f.category == "Cross-Detector" for f in risk_findings)
+    risk_categories = {f.category for f in risk_findings if f.severity in {"HIGH", "MEDIUM"}}
+
+    corroboration_pass = (
+        (high_count >= 2)
+        or (high_count >= 1 and medium_count >= 2)
+        or (high_count >= 1 and has_cross_detector and len(risk_categories) >= 2)
+    )
+
+    gate_cfg = ADVISORY_CONFIG["high_risk_gate"]
+    confidence_pass = (
+        confidence.get("level") in set(gate_cfg["allow_confidence_levels"])
+        and uncertainty_level != gate_cfg["block_on_uncertainty_level"]
+    )
+
+    if level == "HIGH" and gate_cfg["require_corroboration"] and not (corroboration_pass and confidence_pass):
+        level = "MODERATE"
+        rationale.append("HIGH gate applied: downgraded to MODERATE (requires corroboration + confidence pass)")
+
+    rationale.append(
+        f"HIGH gate status: corroboration={'pass' if corroboration_pass else 'fail'}, confidence={'pass' if confidence_pass else 'fail'}"
+    )
 
     return {
         "score": int(round(calibrated_score)),

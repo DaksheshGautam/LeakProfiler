@@ -1,6 +1,7 @@
 import pandas as pd
 
 from LeakProfiler import (
+    ADVISORY_CONFIG,
     Finding,
     advisory_logic,
     determine_splitting_strategy,
@@ -72,3 +73,40 @@ def test_finding_confidence_drops_for_statistical_when_unstable_and_low_confiden
     high_case = estimate_finding_confidence(finding, risk_findings, high_conf, stable)
 
     assert low_case["score"] < high_case["score"]
+
+
+def test_high_risk_gate_downgrades_without_corroboration():
+    findings = [
+        _mk_finding("Group leakage risk detected", "Structural", "HIGH", ["g1"]),
+    ]
+    confidence = {"level": "High", "score": 90}
+    stability = {"level": "Stable", "message": None}
+
+    original_high = ADVISORY_CONFIG["risk_thresholds"]["HIGH"]
+    ADVISORY_CONFIG["risk_thresholds"]["HIGH"] = 5
+    try:
+        profile = estimate_risk_profile(findings, confidence, stability)
+    finally:
+        ADVISORY_CONFIG["risk_thresholds"]["HIGH"] = original_high
+
+    assert profile["level"] == "MODERATE"
+    assert any("HIGH gate applied" in reason for reason in profile["rationale"])
+
+
+def test_high_risk_gate_allows_high_with_corroboration_and_confidence():
+    findings = [
+        _mk_finding("Group leakage risk detected", "Structural", "HIGH", ["g1"]),
+        _mk_finding("Cross-detector temporal consensus", "Cross-Detector", "HIGH", ["g1"]),
+    ]
+    confidence = {"level": "High", "score": 90}
+    stability = {"level": "Stable", "message": None}
+
+    original_high = ADVISORY_CONFIG["risk_thresholds"]["HIGH"]
+    ADVISORY_CONFIG["risk_thresholds"]["HIGH"] = 10
+    try:
+        profile = estimate_risk_profile(findings, confidence, stability)
+    finally:
+        ADVISORY_CONFIG["risk_thresholds"]["HIGH"] = original_high
+
+    assert profile["level"] == "HIGH"
+    assert any("HIGH gate status" in reason for reason in profile["rationale"])
