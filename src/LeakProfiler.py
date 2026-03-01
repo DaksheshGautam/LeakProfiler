@@ -1,4 +1,4 @@
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 FUNC_NAME = "LeakProfiler"
 
 ADVISORY_CONFIG = {
@@ -442,6 +442,25 @@ def estimate_risk_profile(risk_findings, confidence, stability):
     if level == "HIGH" and gate_cfg["require_corroboration"] and not (corroboration_pass and confidence_pass):
         level = "MODERATE"
         rationale.append("HIGH gate applied: downgraded to MODERATE (requires corroboration + confidence pass)")
+
+    strong_group_signal = any(
+        f.title == "Group leakage risk detected" and f.severity in {"HIGH", "MEDIUM"}
+        for f in risk_findings
+    )
+    has_proxy_consensus = any(
+        f.title == "Cross-detector proxy leakage consensus"
+        for f in risk_findings
+    )
+    has_dual_proxy_signals = (
+        "High correlation with target" in contributions
+        and "High feature importance detected" in contributions
+    )
+
+    if level == "LOW" and (strong_group_signal or has_proxy_consensus or has_dual_proxy_signals):
+        level = "MODERATE"
+        rationale.append(
+            "Risk floor applied: elevated to MODERATE due to strong group/proxy leakage signal"
+        )
 
     rationale.append(
         f"HIGH gate status: corroboration={'pass' if corroboration_pass else 'fail'}, confidence={'pass' if confidence_pass else 'fail'}"
@@ -924,11 +943,16 @@ def detect_high_correlation(X, y, target_name=None, threshold=None):
 
     numeric_df_corr = df_corr.select_dtypes(include=np.number)
     correlations = numeric_df_corr.corr()['target'].abs().sort_values(ascending=False)
+    correlations_no_target = correlations.drop(labels=['target'], errors='ignore')
 
     if threshold is None:
-        corr_mean = correlations.mean()
-        corr_std = correlations.std() if len(correlations) > 1 else 0
-        threshold = max(corr_mean + 3 * corr_std, 0.75)
+        if len(correlations_no_target) == 0:
+            threshold = 0.75
+        else:
+            corr_mean = correlations_no_target.mean()
+            corr_std = correlations_no_target.std() if len(correlations_no_target) > 1 else 0
+            threshold = max(corr_mean + 3 * corr_std, 0.75)
+            threshold = min(threshold, 0.99)
 
     high_corr_features = correlations[correlations > threshold]
     evidence = high_corr_features.index.tolist()

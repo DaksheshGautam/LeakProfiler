@@ -8,9 +8,14 @@ LeakProfiler inspects a dataset before training and flags structural/statistical
 
 ## Release Status
 
-**Current release:** `1.0.0` (**Stable**)
+**Current release:** `1.0.1` (**Stable**)
 
 This stable release is validated for broad dataset inspection workflows and packaged for standard PyPI installation.
+
+### What changed in 1.0.1
+- Added a conservative risk floor so strong group/proxy leakage signals are not under-classified as `LOW`.
+- Fixed correlation threshold calibration to reliably catch perfect proxy features.
+- Expanded validation with diverse column-type scenarios and semantic expectation checks.
 
 ---
 
@@ -48,7 +53,7 @@ pip install leakprofiler
 For reproducible environments, pin an exact version:
 
 ```bash
-pip install leakprofiler==1.0.0
+pip install leakprofiler==1.0.1
 ```
 
 ### Option B: Local development install
@@ -190,11 +195,27 @@ python scripts/stability_sweep.py
 ```
 
 Current sweep baseline:
-- total datasets: 128
-- successful runs: 128
+- total datasets: 208
+- successful runs: 208
 - runtime errors: 0
 
 Results are written to `stability_sweep_report.json`.
+
+### Semantic expectation sweep
+
+Run expected-outcome matching against generated datasets:
+
+```bash
+python scripts/semantic_expectation_sweep.py
+```
+
+Current semantic baseline:
+- total datasets: 208
+- passed expectations: 208
+- failed expectations: 0
+- runtime errors: 0
+
+Results are written to `semantic_expectation_report.json`.
 
 ### Build package
 
@@ -211,20 +232,20 @@ python -m twine check dist/*
 ### TestPyPI
 
 ```bash
-python -m twine upload --repository testpypi dist/leakprofiler-1.0.0*
+python -m twine upload --repository testpypi dist/leakprofiler-1.0.1*
 ```
 
 ### PyPI
 
 ```bash
-python -m twine upload dist/leakprofiler-1.0.0*
+python -m twine upload dist/leakprofiler-1.0.1*
 ```
 
 ### Tag suggestion
 
 ```bash
-git tag -a v1.0.0 -m "LeakProfiler 1.0.0 stable"
-git push origin v1.0.0
+git tag -a v1.0.1 -m "LeakProfiler 1.0.1 stable"
+git push origin v1.0.1
 ```
 
 ---

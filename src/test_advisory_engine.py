@@ -5,6 +5,7 @@ from LeakProfiler import (
     Finding,
     _parse_args,
     advisory_logic,
+    detect_high_correlation,
     determine_splitting_strategy,
     estimate_finding_confidence,
     estimate_risk_profile,
@@ -162,3 +163,45 @@ def test_parse_args_accepts_mixed_positional_file_and_target_flag(monkeypatch):
 
     assert args.file == "dataset.csv"
     assert args.target == "label"
+
+
+def test_risk_floor_promotes_group_signal_to_moderate():
+    findings = [
+        _mk_finding("Group leakage risk detected", "Structural", "HIGH", ["g1"]),
+    ]
+    confidence = {"level": "Low", "score": 40}
+    stability = {"level": "Warning", "message": "few samples"}
+
+    profile = estimate_risk_profile(findings, confidence, stability)
+
+    assert profile["level"] == "MODERATE"
+    assert any("Risk floor applied" in reason for reason in profile["rationale"])
+
+
+def test_risk_floor_promotes_proxy_overlap_to_moderate():
+    findings = [
+        _mk_finding("High correlation with target", "Statistical", "MEDIUM", ["proxy_target"]),
+        _mk_finding("High feature importance detected", "Statistical", "MEDIUM", ["proxy_target"]),
+    ]
+    confidence = {"level": "Low", "score": 45}
+    stability = {"level": "Warning", "message": "few samples"}
+
+    profile = estimate_risk_profile(findings, confidence, stability)
+
+    assert profile["level"] == "MODERATE"
+    assert any("Risk floor applied" in reason for reason in profile["rationale"])
+
+
+def test_detect_high_correlation_catches_perfect_proxy():
+    df = pd.DataFrame(
+        {
+            "feature_a": [0.1, 0.2, 0.3, 0.4, 0.5],
+            "proxy_target": [0, 1, 0, 1, 0],
+            "target": [0, 1, 0, 1, 0],
+        }
+    )
+
+    finding = detect_high_correlation(df.drop(columns=["target"]), df["target"], target_name="target")
+
+    assert finding is not None
+    assert "proxy_target" in finding.evidence

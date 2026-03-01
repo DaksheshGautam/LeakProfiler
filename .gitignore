@@ -7,3 +7,4 @@ dist
 scripts
 validation_datasets
 stability_sweep_report.json
+semantic_expectation_report.json
