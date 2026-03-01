@@ -4,3 +4,6 @@ __pycache__
 .venv
 leakprofiler.egg-info
 dist
+scripts
+validation_datasets
+stability_sweep_report.json

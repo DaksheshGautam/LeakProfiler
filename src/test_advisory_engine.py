@@ -129,3 +129,36 @@ def test_parse_args_accepts_unicode_dash_for_target(monkeypatch):
 
     assert args.file == "dataset.csv"
     assert args.target == "label"
+
+
+def test_parse_args_accepts_positional_file_and_target(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "leakprofiler",
+            "dataset.csv",
+            "target_col",
+        ],
+    )
+
+    args = _parse_args()
+
+    assert args.file == "dataset.csv"
+    assert args.target == "target_col"
+
+
+def test_parse_args_accepts_mixed_positional_file_and_target_flag(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "leakprofiler",
+            "dataset.csv",
+            "--target",
+            "label",
+        ],
+    )
+
+    args = _parse_args()
+
+    assert args.file == "dataset.csv"
+    assert args.target == "label"

@@ -8,9 +8,9 @@ LeakProfiler inspects a dataset before training and flags structural/statistical
 
 ## Release Status
 
-**Current release:** `1.0.0a2` (**Alpha**)
+**Current release:** `1.0.0` (**Stable**)
 
-This alpha is production-installable from PyPI, but scoring policy and heuristics may still evolve based on early feedback.
+This stable release is validated for broad dataset inspection workflows and packaged for standard PyPI installation.
 
 ---
 
@@ -42,7 +42,7 @@ This alpha is production-installable from PyPI, but scoring policy and heuristic
 ### Option A: Install from PyPI (recommended)
 
 ```bash
-pip install leakprofiler==1.0.0a2
+pip install leakprofiler==1.0.0
 ```
 
 ### Option B: Local development install
@@ -64,15 +64,20 @@ pip install "leakprofiler[notebook]"
 ### CLI (installed package)
 
 ```bash
-leakprofiler --file dataset.csv --target TargetColumn
-leakprofiler --file dataset.csv --target TargetColumn --json
-leakprofiler --file dataset.csv --target TargetColumn --json-path leakprofiler_report.json
+leakprofiler --file "dataset.csv" --target "TargetColumn"
+leakprofiler --file "dataset.csv" --target "TargetColumn" --json
+leakprofiler --file "dataset.csv" --target "TargetColumn" --json-path "leakprofiler_report.json"
+
+# Positional shorthand (also supported)
+leakprofiler "dataset.csv" "TargetColumn"
+leakprofiler "dataset.csv" "TargetColumn" --json
 ```
 
 ### CLI (from source tree)
 
 ```bash
-python src/LeakProfiler.py --file dataset.csv --target TargetColumn --json
+python src/LeakProfiler.py --file "dataset.csv" --target "TargetColumn" --json
+python src/LeakProfiler.py "dataset.csv" "TargetColumn" --json
 ```
 
 ### Python API
@@ -170,6 +175,21 @@ Combines independent signals to produce composite findings such as:
 pytest -q src/test_advisory_engine.py
 ```
 
+### Stability sweep (100+ datasets)
+
+Run the automated edge-case sweep:
+
+```bash
+python scripts/stability_sweep.py
+```
+
+Current sweep baseline:
+- total datasets: 128
+- successful runs: 128
+- runtime errors: 0
+
+Results are written to `stability_sweep_report.json`.
+
 ### Build package
 
 ```bash
@@ -185,20 +205,20 @@ python -m twine check dist/*
 ### TestPyPI
 
 ```bash
-python -m twine upload --repository testpypi dist/leakprofiler-1.0.0a2*
+python -m twine upload --repository testpypi dist/leakprofiler-1.0.0*
 ```
 
 ### PyPI
 
 ```bash
-python -m twine upload dist/leakprofiler-1.0.0a2*
+python -m twine upload dist/leakprofiler-1.0.0*
 ```
 
 ### Tag suggestion
 
 ```bash
-git tag -a v1.0.0-alpha.2 -m "LeakProfiler 1.0.0 alpha 2"
-git push origin v1.0.0-alpha.2
+git tag -a v1.0.0 -m "LeakProfiler 1.0.0 stable"
+git push origin v1.0.0
 ```
 
 ---

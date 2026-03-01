@@ -1,4 +1,4 @@
-__version__ = "1.0.0a2"
+__version__ = "1.0.0"
 FUNC_NAME = "LeakProfiler"
 
 ADVISORY_CONFIG = {
@@ -1281,11 +1281,29 @@ def _parse_args():
     argv = _normalize_dash_prefix(sys.argv[1:])
 
     parser = argparse.ArgumentParser(description=f"{FUNC_NAME} data leakage scanner")
-    parser.add_argument("--file", required=True, help="Path to CSV dataset")
-    parser.add_argument("--target", "--target-column", "-t", required=True, help="Target column name")
+    parser.add_argument("file_pos", nargs="?", help="Path to CSV dataset (positional)")
+    parser.add_argument("target_pos", nargs="?", help="Target column name (positional)")
+    parser.add_argument("--file", dest="file_opt", default=None, help="Path to CSV dataset")
+    parser.add_argument("--target", "--target-column", "-t", dest="target_opt", default=None, help="Target column name")
     parser.add_argument("--json", action="store_true", help="Print JSON export to stdout")
     parser.add_argument("--json-path", default=None, help="Write JSON export to this path")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+
+    file_value = args.file_opt if args.file_opt is not None else args.file_pos
+    target_value = args.target_opt if args.target_opt is not None else args.target_pos
+
+    if file_value is None or target_value is None:
+        parser.error("both dataset file and target are required (use positional args or --file/--target)")
+
+    if args.file_opt is not None and args.file_pos is not None and args.file_opt != args.file_pos:
+        parser.error("conflicting dataset values supplied via positional and --file")
+
+    if args.target_opt is not None and args.target_pos is not None and args.target_opt != args.target_pos:
+        parser.error("conflicting target values supplied via positional and --target")
+
+    args.file = file_value
+    args.target = target_value
+    return args
 
 
 def main():
