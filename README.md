@@ -1,10 +1,27 @@
 # LeakProfiler
 
-Pre-model data leakage scanner for machine learning datasets.
+![PyPI version](https://img.shields.io/pypi/v/leakprofiler)
+![Python](https://img.shields.io/pypi/pyversions/leakprofiler)
+![License](https://img.shields.io/github/license/daksheshgautam/LeakProfiler)
 
-LeakProfiler inspects a dataset before training and flags structural/statistical leakage patterns that can inflate model performance. It does not train models, clean data, or do feature engineering—it focuses on leakage risk discovery, explainable risk scoring, and actionable validation guidance.
+
+LeakProfiler is a Python package for automated data leakage detection and machine learning validation strategy analysis.
+
+It inspects tabular datasets *before training* and flags structural, statistical, and temporal leakage patterns that can inflate model performance.
+
+LeakProfiler focuses on:
+- Leakage risk discovery
+- Explainable risk scoring
+- Validation strategy guidance (TimeSeriesSplit, GroupKFold, etc.)
 
 ---
+
+## Why Data Leakage Matters
+
+Data leakage can artificially inflate model accuracy and lead to unreliable production deployment. 
+LeakProfiler helps detect hidden leakage patterns before training, ensuring trustworthy evaluation results.
+
+
 
 ## Release Status
 
